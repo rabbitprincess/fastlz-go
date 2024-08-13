@@ -43,36 +43,6 @@ func xxHashMask(data []byte) uint {
 	return uint(hash & HASH_MASK)
 }
 
-func flzReadU32(p []byte) uint32 {
-	return *(*uint32)(unsafe.Pointer(&p[0]))
-}
-
-func flzLiterals(runs int, src, dest []byte) []byte {
-	for runs >= MAX_COPY {
-		dest = append(dest, MAX_COPY-1)
-		dest = append(dest, src[:MAX_COPY]...)
-		src = src[MAX_COPY:]
-		runs -= MAX_COPY
-	}
-	if runs > 0 {
-		dest = append(dest, byte(runs-1))
-		dest = append(dest, src[:runs]...)
-	}
-	return dest
-}
-
-func flzCmp(p, q, r []byte) int {
-	n := min(len(p), len(q))
-	n = min(n, int(uintptr(unsafe.Pointer(&r[0]))-uintptr(unsafe.Pointer(&p[0]))))
-
-	for i := 0; i < n; i++ {
-		if p[i] != q[i] {
-			return i
-		}
-	}
-	return n
-}
-
 func fastlz1Compress(input []byte, length int, output []byte) int {
 	var ip uint = 0
 	var ip_bound uint = uint(length - 2)
