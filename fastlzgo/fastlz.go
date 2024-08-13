@@ -2,6 +2,9 @@ package fastlzgo
 
 import (
 	"errors"
+	"unsafe"
+
+	"github.com/rabbitprincess/fastlz-go/fastlzgo/xxhash"
 )
 
 func Compress(input []byte) ([]byte, error) {
@@ -27,12 +30,48 @@ func fastlzCompress(input, output []byte) int {
 	return fastlz2Compress(input, output)
 }
 
-func fastlz1Compress(input, output []byte) int {
+const (
+	MaxCopy        = 32
+	MaxLen         = 256 + 8
+	MaxL1Distance  = 8192
+	MaxL2Distance  = 8191
+	MaxFarDistance = 65535 + MaxL2Distance - 1
+	HashLog        = 13
+	HashSize       = 1 << HashLog
+	HashMask       = HashSize - 1
+)
 
-	return 0
+func xxHashMask(data []byte) uint32 {
+	hash := xxhash.Sum64(data)
+	return uint32(hash & HashMask)
 }
 
-func fastlz2Compress(input, output []byte) int {
+func flzReadU32(p []byte) uint32 {
+	return *(*uint32)(unsafe.Pointer(&p[0]))
+}
 
-	return 0
+func flzLiterals(runs int, src, dest []byte) []byte {
+	for runs >= MaxCopy {
+		dest = append(dest, MaxCopy-1)
+		dest = append(dest, src[:MaxCopy]...)
+		src = src[MaxCopy:]
+		runs -= MaxCopy
+	}
+	if runs > 0 {
+		dest = append(dest, byte(runs-1))
+		dest = append(dest, src[:runs]...)
+	}
+	return dest
+}
+
+func flzCmp(p, q, r []byte) int {
+	n := min(len(p), len(q))
+	n = min(n, int(uintptr(unsafe.Pointer(&r[0]))-uintptr(unsafe.Pointer(&p[0]))))
+
+	for i := 0; i < n; i++ {
+		if p[i] != q[i] {
+			return i
+		}
+	}
+	return n
 }
