@@ -1,19 +1,10 @@
 package fastlz
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
-
-func TestCompress(t *testing.T) {
-	bt := make([]byte, 10)
-	enc, err := Compress(bt)
-	require.NoError(t, err)
-
-	fmt.Println(enc)
-}
 
 func BenchmarkCompress(b *testing.B) {
 	b.Run("Length 2<<8", func(b *testing.B) {
