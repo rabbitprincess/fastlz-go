@@ -2,8 +2,6 @@ package fastlzgo
 
 import (
 	"unsafe"
-
-	"github.com/rabbitprincess/fastlz-go/fastlzgo/xxhash"
 )
 
 func fastlzCompress(input []byte, length int, output []byte) int {
@@ -37,11 +35,6 @@ const (
 	HASH_SIZE       = 1 << HASH_LOG
 	HASH_MASK       = HASH_SIZE - 1
 )
-
-func xxHashMask(data []byte) uint {
-	hash := xxhash.Sum64(data)
-	return uint(hash & HASH_MASK)
-}
 
 func fastlz1Compress(input []byte, length int, output []byte) int {
 	var ip uint = 0
@@ -102,7 +95,9 @@ func fastlz1Compress(input []byte, length int, output []byte) int {
 		// do nothing
 
 		/* find potential match */
-		hval = xxHashMask(input[ip : ip+3])
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
 
 		hslot = hval
 		ref = htab[hval]
@@ -235,10 +230,14 @@ func fastlz1Compress(input []byte, length int, output []byte) int {
 		}
 
 		/* update the hash at match boundary */
-		hval = xxHashMask(input[ip : ip+3])
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
 		htab[hval] = ip
 		ip++
-		hval = xxHashMask(input[ip : ip+3])
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
 		htab[hval] = ip
 		ip++
 
@@ -520,10 +519,14 @@ func fastlz2Compress(input []byte, length int, output []byte) int {
 		}
 
 		/* update the hash at match boundary */
-		hval = xxHashMask(input[ip : ip+3])
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
 		htab[hval] = ip
 		ip++
-		hval = xxHashMask(input[ip : ip+3])
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
 		htab[hval] = ip
 		ip++
 
