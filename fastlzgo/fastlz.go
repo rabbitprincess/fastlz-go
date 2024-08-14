@@ -64,35 +64,33 @@ import (
 //int fastlz_compress_level(int level, const void* input, int length, void* output);
 //int fastlz_decompress(const void* input, int length, void* output, int maxout);
 
-const MAX_COPY = 32
-const MAX_LEN = 264        /* 256 + 8 */
-const MAX_DISTANCE1 = 8192 // MAX_DISTANCE
+const (
+	MAX_COPY      = 32
+	MAX_LEN       = 264  /* 256 + 8 */
+	MAX_DISTANCE1 = 8192 // MAX_DISTANCE
 
-// FASTLZ_READU16 -  will expand into the code
+	// FASTLZ_READU16 -  will expand into the code
+	HASH_LOG  = 13
+	HASH_SIZE = (1 << HASH_LOG)
+	HASH_MASK = (HASH_SIZE - 1)
 
-const HASH_LOG = 13
-const HASH_SIZE = (1 << HASH_LOG)
-const HASH_MASK = (HASH_SIZE - 1)
-
-// HASH_FUNCTION - will expand into the code
-
-const MAX_DISTANCE2 = 8191 // MAX_DISTANCE
-const MAX_FARDISTANCE = (65535 + MAX_DISTANCE2 - 1)
+	// HASH_FUNCTION - will expand into the code
+	MAX_DISTANCE2   = 8191 // MAX_DISTANCE
+	MAX_FARDISTANCE = (65535 + MAX_DISTANCE2 - 1)
+)
 
 /*
-*
+Compress a block of data in the input buffer and returns the size of
+compressed block. The size of input buffer is specified by length. The
+minimum input buffer size is 16.
 
-	Compress a block of data in the input buffer and returns the size of
-	compressed block. The size of input buffer is specified by length. The
-	minimum input buffer size is 16.
+The output buffer must be at least 5% larger than the input buffer
+and can not be smaller than 66 bytes.
 
-	The output buffer must be at least 5% larger than the input buffer
-	and can not be smaller than 66 bytes.
+If the input is not compressible, the return value might be larger than
+length (input buffer size).
 
-	If the input is not compressible, the return value might be larger than
-	length (input buffer size).
-
-	The input buffer and the output buffer can not overlap.
+The input buffer and the output buffer can not overlap.
 */
 func fastlzCompress(input []byte, length int, output []byte) int {
 	/* for short block, choose fastlz1 */
@@ -104,17 +102,15 @@ func fastlzCompress(input []byte, length int, output []byte) int {
 }
 
 /*
-*
+Decompress a block of compressed data and returns the size of the
+decompressed block. If error occurs, e.g. the compressed data is
+corrupted or the output buffer is not large enough, then 0 (zero)
+will be returned instead.
 
-	Decompress a block of compressed data and returns the size of the
-	decompressed block. If error occurs, e.g. the compressed data is
-	corrupted or the output buffer is not large enough, then 0 (zero)
-	will be returned instead.
+The input buffer and the output buffer can not overlap.
 
-	The input buffer and the output buffer can not overlap.
-
-	Decompression is memory safe and guaranteed not to write the output buffer
-	more than what is specified in maxout.
+Decompression is memory safe and guaranteed not to write the output buffer
+more than what is specified in maxout.
 */
 func fastlzDecompress(input []byte, length int, output []byte, maxout int) int {
 	/* magic identifier for compression level */
@@ -131,27 +127,25 @@ func fastlzDecompress(input []byte, length int, output []byte, maxout int) int {
 }
 
 /*
-*
+Compress a block of data in the input buffer and returns the size of
+compressed block. The size of input buffer is specified by length. The
+minimum input buffer size is 16.
 
-	Compress a block of data in the input buffer and returns the size of
-	compressed block. The size of input buffer is specified by length. The
-	minimum input buffer size is 16.
+The output buffer must be at least 5% larger than the input buffer
+and can not be smaller than 66 bytes.
 
-	The output buffer must be at least 5% larger than the input buffer
-	and can not be smaller than 66 bytes.
+If the input is not compressible, the return value might be larger than
+length (input buffer size).
 
-	If the input is not compressible, the return value might be larger than
-	length (input buffer size).
+The input buffer and the output buffer can not overlap.
 
-	The input buffer and the output buffer can not overlap.
+Compression level can be specified in parameter level. At the moment,
+only level 1 and level 2 are supported.
+Level 1 is the fastest compression and generally useful for short data.
+Level 2 is slightly slower but it gives better compression ratio.
 
-	Compression level can be specified in parameter level. At the moment,
-	only level 1 and level 2 are supported.
-	Level 1 is the fastest compression and generally useful for short data.
-	Level 2 is slightly slower but it gives better compression ratio.
-
-	Note that the compressed data, regardless of the level, can always be
-	decompressed using the function fastlz_decompress above.
+Note that the compressed data, regardless of the level, can always be
+decompressed using the function fastlz_decompress above.
 */
 func Fastlz_compress_level(level int, input []byte, length int, output []byte) int {
 	if len(output) < int(math.Max(66, float64(length)*1.05)) {
@@ -167,42 +161,40 @@ func Fastlz_compress_level(level int, input []byte, length int, output []byte) i
 }
 
 func fastlz1Compress(input []byte, length int, output []byte) int {
+	if length == 0 {
+		return 0
+	}
+
 	var ip uint = 0
 	var ip_bound uint = uint(length - 2)
 	var ip_limit uint = uint(length)
-	if length >= 12 {
+	if ip_limit >= 12 {
 		ip_limit -= 12
 	}
+
 	var op uint = 0
+	if length < 4 {
+		/* create literal copy only */
+		output[op] = byte(length - 1)
+		op++
+		ip_bound++
+		for ip <= ip_bound {
+			output[op] = input[ip]
+			op++
+			ip++
+		}
+		return length + 1
+	}
 
 	var htab [HASH_SIZE]uint
 	var hslot uint
 	var hval uint
 
-	var copy uint
-
-	/* sanity check */
-	if length < 4 {
-		if length != 0 {
-			/* create literal copy only */
-			output[op] = byte(length - 1)
-			op++
-			ip_bound++
-			for ip <= ip_bound {
-				output[op] = input[ip]
-				op++
-				ip++
-			}
-			return length + 1
-		} else {
-			return 0
-		}
-	}
-
 	/* initializes hash table */
 	// do nothing
 
 	/* we start with literal copy */
+	var copy uint
 	copy = 2
 	output[op] = MAX_COPY - 1
 	op++
@@ -418,39 +410,40 @@ func fastlz1Compress(input []byte, length int, output []byte) int {
 }
 
 func fastlz2Compress(input []byte, length int, output []byte) int {
+	if length == 0 {
+		return 0
+	}
+
 	var ip uint = 0
 	var ip_bound uint = uint(length - 2)
-	var ip_limit uint = uint(length - 12)
+	var ip_limit uint = uint(length)
+	if ip_limit >= 12 {
+		ip_limit -= 12
+	}
+
 	var op uint = 0
+	if length < 4 {
+		/* create literal copy only */
+		output[op] = byte(length - 1)
+		op++
+		ip_bound++
+		for ip <= ip_bound {
+			output[op] = input[ip]
+			op++
+			ip++
+		}
+		return length + 1
+	}
 
 	var htab [HASH_SIZE]uint
 	var hslot uint
 	var hval uint
 
-	var copy uint
-
-	/* sanity check */
-	if length < 4 {
-		if length != 0 {
-			/* create literal copy only */
-			output[op] = byte(length - 1)
-			op++
-			ip_bound++
-			for ip <= ip_bound {
-				output[op] = input[ip]
-				op++
-				ip++
-			}
-			return length + 1
-		} else {
-			return 0
-		}
-	}
-
 	/* initializes hash table */
 	// do nothing
 
 	/* we start with literal copy */
+	var copy uint
 	copy = 2
 	output[op] = MAX_COPY - 1
 	op++
