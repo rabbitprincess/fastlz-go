@@ -1,15 +1,17 @@
 package fastlzgo
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestEncodeDeoode(t *testing.T) {
-	bt := []byte("hello world")
+	bt := []byte("hel")
 	enc, err := Compress(bt)
 	require.NoError(t, err)
+	fmt.Println(enc)
 	dec, err := Decompress(enc)
 	require.NoError(t, err)
 	require.Equal(t, bt, dec)

@@ -1,3 +1,29 @@
+/*
+  FastLZ - lightning-fast lossless compression library
+
+  Copyright (C) 2007 Ariya Hidayat (ariya@kde.org)
+  Copyright (C) 2006 Ariya Hidayat (ariya@kde.org)
+  Copyright (C) 2005 Ariya Hidayat (ariya@kde.org)
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+*/
+
 package fastlzgo
 
 import (
@@ -5,13 +31,91 @@ import (
 	"unsafe"
 )
 
-func fastlzCompress(input []byte, output []byte) int {
-	if len(input) < 65536 {
-		return fastlz1Compress(input, output)
+/*
+ * Always check for bound when decompressing.
+ * Generally it is best to leave it defined.
+ */
+// FASTLZ_SAFE - will leave it
+
+/*
+ * Give hints to the compiler for branch prediction optimization.
+ */
+// FASTLZ_EXPECT_CONDITIONAL - golang does not support
+
+/*
+ * Use inlined functions for supported systems.
+ */
+// FASTLZ_INLINE - golang does not support
+
+/*
+ * Prevent accessing more than 8-bit at once, except on x86 architectures.
+ */
+// FASTLZ_STRICT_ALIGN - will ONLY support x64 for golang !!!
+
+/*
+ * FIXME: use preprocessor magic to set this on different platforms!
+ */
+//type flzuint8 uint8
+//type flzuint16 uint16
+//type flzuint32 uint32
+
+/* prototypes */
+//int fastlz_compress(const void* input, int length, void* output);
+//int fastlz_compress_level(int level, const void* input, int length, void* output);
+//int fastlz_decompress(const void* input, int length, void* output, int maxout);
+
+const MAX_COPY = 32
+const MAX_LEN = 264        /* 256 + 8 */
+const MAX_DISTANCE1 = 8192 // MAX_DISTANCE
+
+// FASTLZ_READU16 -  will expand into the code
+
+const HASH_LOG = 13
+const HASH_SIZE = (1 << HASH_LOG)
+const HASH_MASK = (HASH_SIZE - 1)
+
+// HASH_FUNCTION - will expand into the code
+
+const MAX_DISTANCE2 = 8191 // MAX_DISTANCE
+const MAX_FARDISTANCE = (65535 + MAX_DISTANCE2 - 1)
+
+/*
+*
+
+	Compress a block of data in the input buffer and returns the size of
+	compressed block. The size of input buffer is specified by length. The
+	minimum input buffer size is 16.
+
+	The output buffer must be at least 5% larger than the input buffer
+	and can not be smaller than 66 bytes.
+
+	If the input is not compressible, the return value might be larger than
+	length (input buffer size).
+
+	The input buffer and the output buffer can not overlap.
+*/
+func fastlzCompress(input []byte, length int, output []byte) int {
+	/* for short block, choose fastlz1 */
+	if length < 65536 {
+		return fastlz1Compress(input, length, output)
 	}
-	return fastlz2Compress(input, output)
+	/* else... */
+	return fastlz2Compress(input, length, output)
 }
 
+/*
+*
+
+	Decompress a block of compressed data and returns the size of the
+	decompressed block. If error occurs, e.g. the compressed data is
+	corrupted or the output buffer is not large enough, then 0 (zero)
+	will be returned instead.
+
+	The input buffer and the output buffer can not overlap.
+
+	Decompression is memory safe and guaranteed not to write the output buffer
+	more than what is specified in maxout.
+*/
 func fastlzDecompress(input []byte, length int, output []byte, maxout int) int {
 	/* magic identifier for compression level */
 	level := ((*(*uint8)(unsafe.Pointer(&input[0]))) >> 5) + 1
@@ -26,301 +130,583 @@ func fastlzDecompress(input []byte, length int, output []byte, maxout int) int {
 	return 0
 }
 
-const (
-	MAX_COPY        = 32
-	MAX_LEN         = 256 + 8
-	MAX_DISTANCE1   = 8192
-	MAX_DISTANCE2   = 8191
-	MAX_FARDISTANCE = 65535 + MAX_DISTANCE2 - 1
-	HASH_LOG        = 13
-	HASH_SIZE       = 1 << HASH_LOG
-	HASH_MASK       = HASH_SIZE - 1
-)
+/*
+*
 
-func flzHash(v uint32) uint16 {
-	h := (v * 2654435769) >> (32 - HASH_LOG)
-	return uint16(h & HASH_MASK)
+	Compress a block of data in the input buffer and returns the size of
+	compressed block. The size of input buffer is specified by length. The
+	minimum input buffer size is 16.
+
+	The output buffer must be at least 5% larger than the input buffer
+	and can not be smaller than 66 bytes.
+
+	If the input is not compressible, the return value might be larger than
+	length (input buffer size).
+
+	The input buffer and the output buffer can not overlap.
+
+	Compression level can be specified in parameter level. At the moment,
+	only level 1 and level 2 are supported.
+	Level 1 is the fastest compression and generally useful for short data.
+	Level 2 is slightly slower but it gives better compression ratio.
+
+	Note that the compressed data, regardless of the level, can always be
+	decompressed using the function fastlz_decompress above.
+*/
+func Fastlz_compress_level(level int, input []byte, length int, output []byte) int {
+	if len(output) < int(math.Max(66, float64(length)*1.05)) {
+		return 0
+	}
+	if level == 1 {
+		return fastlz1Compress(input, length, output)
+	}
+	if level == 2 {
+		return fastlz2Compress(input, length, output)
+	}
+	return 0
 }
 
-func flzLiterals(length uint, anchor, op []byte) []byte {
-	for length >= MAX_COPY {
-		op[0] = MAX_COPY - 1
-		copy(op[1:], anchor[:MAX_COPY])
-		op = op[MAX_COPY+1:]
-		anchor = anchor[MAX_COPY:]
-		length -= MAX_COPY
+func fastlz1Compress(input []byte, length int, output []byte) int {
+	var ip uint = 0
+	var ip_bound uint = uint(length - 2)
+	var ip_limit uint = uint(length)
+	if length >= 12 {
+		ip_limit -= 12
 	}
-	if length > 0 {
-		op[0] = byte(length - 1)
-		copy(op[1:], anchor[:length])
-		op = op[length+1:]
-	}
-	return op
-}
+	var op uint = 0
 
-func flz1Match(len uint32, distance uint32, op []byte) []byte {
-	distance-- // Decrement distance
+	var htab [HASH_SIZE]uint
+	var hslot uint
+	var hval uint
 
-	if len > MAX_LEN-2 {
-		for len > MAX_LEN-2 {
-			op[0] = byte((7 << 5) + (distance >> 8))
-			op[1] = MAX_LEN - 2 - 7 - 2
-			op[2] = byte(distance & 255)
-			op = op[3:] // Move op slice forward by 3 bytes
-			len -= MAX_LEN - 2
+	var copy uint
+
+	/* sanity check */
+	if length < 4 {
+		if length != 0 {
+			/* create literal copy only */
+			output[op] = byte(length - 1)
+			op++
+			ip_bound++
+			for ip <= ip_bound {
+				output[op] = input[ip]
+				op++
+				ip++
+			}
+			return length + 1
+		} else {
+			return 0
 		}
 	}
 
-	if len < 7 {
-		op[0] = byte((len << 5) + (distance >> 8))
-		op[1] = byte(distance & 255)
-		op = op[2:] // Move op slice forward by 2 bytes
-	} else {
-		op[0] = byte((7 << 5) + (distance >> 8))
-		op[1] = byte(len - 7)
-		op[2] = byte(distance & 255)
-		op = op[3:] // Move op slice forward by 3 bytes
-	}
+	/* initializes hash table */
+	// do nothing
 
-	return op
-}
+	/* we start with literal copy */
+	copy = 2
+	output[op] = MAX_COPY - 1
+	op++
+	output[op] = input[ip]
+	op++
+	ip++
+	output[op] = input[ip]
+	op++
+	ip++
 
-// flzReadU32 reads a 32-bit unsigned integer from the given byte slice.
-func flzReadU32(ptr []byte) uint32 {
-	return *(*uint32)(unsafe.Pointer(&ptr[0]))
-}
+	/* main loop */
+	for ip < ip_limit {
+		var ref uint
+		var distance uint
 
-// flzCmp compares the byte slices p and q up to r and returns the length of the matching portion.
-func flzCmp(p, q, r []byte) int {
-	if *(*uint32)(unsafe.Pointer(&p[0])) == *(*uint32)(unsafe.Pointer(&q[0])) {
-		p = p[4:]
-		q = q[4:]
-	}
+		/* minimum match length */
+		var len uint = 3
 
-	for len(q) > 0 && len(p) > 0 && len(q) <= len(r) {
-		if p[0] != q[0] {
-			break
+		/* comparison starting-point */
+		anchor := ip
+
+		/* check for a run */
+		// do nothing
+
+		/* find potential match */
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
+
+		hslot = hval
+		ref = htab[hval]
+
+		/* calculate distance to the match */
+		distance = anchor - ref
+
+		/* update hash table */
+		htab[hslot] = anchor
+
+		/* is this a match? check the first 3 bytes */
+		if distance == 0 ||
+			(distance >= MAX_DISTANCE1) ||
+			input[ref] != input[ip] || input[ref+1] != input[ip+1] || input[ref+2] != input[ip+2] {
+			goto literal
 		}
-		p = p[1:]
-		q = q[1:]
-	}
 
-	// Return the length of the match.
-	return len(p) - len(r)
-}
+		/* last matched byte */
+		ref += len
+		ip = anchor + len
 
-func fastlz1Compress(input []byte, output []byte) int {
-	ip := 0
-	ipStart := 0
-	ipBound := len(input) - 4
-	ipLimit := len(input) - 12 - 1
-	op := 0
+		/* distance is biased */
+		distance--
 
-	var htab [HASH_SIZE]uint32
-	var seq, hash uint32
+		if distance == 0 {
+			/* zero distance means a run */
+			x := input[ip-1]
+			for ip < ip_bound {
+				if input[ref] != x {
+					break
+				} else {
+					ip++
+				}
+				ref++
+			}
+		} else {
+			for {
+				/* safe because the outer check against ip limit */
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
 
-	// Initialize hash table
-	for i := range htab {
-		htab[i] = 0
-	}
-
-	// Start with literal copy
-	anchor := ip
-	ip += 2
-
-	// Main loop
-	for ip < ipLimit {
-		var ref int
-		var distance uint32
-		var cmp uint32
-
-		// Find potential match
-		for {
-			if ip+3 >= len(input) {
+				for ip < ip_bound {
+					if input[ref] != input[ip] {
+						break
+					}
+					ref++
+					ip++
+				}
 				break
 			}
-			seq = flzReadU32(input[ip:]) & 0xffffff
-			hash = uint32(flzHash(seq))
-			ref = ipStart + int(htab[hash])
-			htab[hash] = uint32(ip - ipStart)
-			distance = uint32(ip - ref)
-			cmp = uint32(math.MaxUint32)
-			if distance < MAX_DISTANCE1 {
-				cmp = flzReadU32(input[ref:]) & 0xffffff
-			}
-			if ip >= ipLimit {
-				break
-			}
+			ref++
 			ip++
-			if seq == cmp {
-				break
-			}
 		}
-
-		if ip >= ipLimit {
-			break
+		/* if we have copied something, adjust the copy count */
+		if copy != 0 {
+			/* copy is biased, '0' means 1 byte copy */
+			output[op-copy-1] = byte(copy - 1)
+		} else {
+			/* back, to overwrite the copy count */
+			op--
 		}
-		ip--
+		/* reset literal counter */
+		copy = 0
 
-		if ip > anchor {
-			output = flzLiterals(uint(ip-anchor), input[anchor:ip], output[op:])
-			op = len(output)
-		}
+		/* length is biased, '1' means a match of 3 bytes */
+		ip -= 3
+		len = ip - anchor
 
-		matchLen := uint32(flzCmp(input[ref+3:], input[ip+3:], input[ipBound:]))
-		output = flz1Match(matchLen, distance, output)
-		op = len(output)
-
-		// Update the hash at match boundary
-		ip += int(matchLen)
-		seq = flzReadU32(input[ip:])
-		hash = uint32(flzHash(seq & 0xffffff))
-		htab[hash] = uint32(ip - ipStart)
-		seq >>= 8
-		hash = uint32(flzHash(seq))
-		htab[hash] = uint32(ip - ipStart + 1)
-
-		anchor = ip
-	}
-
-	copyLen := len(input) - anchor
-	output = flzLiterals(uint(copyLen), input[anchor:], output)
-	op = len(output)
-
-	return op
-}
-
-// Define flz2Match function
-func flz2Match(len uint32, distance uint32, op []byte) []byte {
-	distance-- // Decrement distance
-
-	if distance < MAX_DISTANCE2 {
-		// Near match
-		if len > MAX_LEN-2 {
-			for len > MAX_LEN-2 {
-				op[0] = byte((7 << 5) + (distance >> 8))
-				op[1] = MAX_LEN - 2 - 7 - 2
-				op[2] = byte(distance & 255)
-				op = op[3:] // Move op slice forward by 3 bytes
-				len -= MAX_LEN - 2
-			}
+		/* encode the match */
+		for len > MAX_LEN-2 {
+			output[op] = byte((7 << 5) + (distance >> 8))
+			op++
+			output[op] = MAX_LEN - 2 - 7 - 2
+			op++
+			output[op] = byte(distance & 255)
+			op++
+			len -= MAX_LEN - 2
 		}
 
 		if len < 7 {
-			op[0] = byte((len << 5) + (distance >> 8))
-			op[1] = byte(distance & 255)
-			op = op[2:] // Move op slice forward by 2 bytes
+			output[op] = byte((len << 5) + (distance >> 8))
+			op++
+			output[op] = byte(distance & 255)
+			op++
 		} else {
-			op[0] = byte((7 << 5) + (distance >> 8))
-			op[1] = byte(len - 7)
-			op[2] = byte(distance & 255)
-			op = op[3:] // Move op slice forward by 3 bytes
+			output[op] = byte((7 << 5) + (distance >> 8))
+			op++
+			output[op] = byte(len - 7)
+			op++
+			output[op] = byte(distance & 255)
+			op++
 		}
-	} else {
-		// Far match
-		len -= 3
-		op[0] = byte((7 << 5) + 31)
-		op[1] = byte(len >> 8)
-		op[2] = byte(len & 255)
-		op[3] = byte(distance >> 8)
-		op[4] = byte(distance & 255)
-		op = op[5:] // Move op slice forward by 5 bytes
+
+		/* update the hash at match boundary */
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
+		htab[hval] = ip
+		ip++
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
+		htab[hval] = ip
+		ip++
+
+		/* assuming literal copy */
+		output[op] = MAX_COPY - 1
+		op++
+
+		continue
+
+	literal:
+		output[op] = input[anchor]
+		op++
+		anchor++
+		ip = anchor
+		copy++
+		if copy == MAX_COPY {
+			copy = 0
+			output[op] = MAX_COPY - 1
+			op++
+		}
 	}
 
-	return op
+	/* left-over as literal copy */
+	ip_bound++
+	for ip <= ip_bound {
+		output[op] = input[ip]
+		op++
+		ip++
+		copy++
+		if copy == MAX_COPY {
+			copy = 0
+			output[op] = MAX_COPY - 1
+			op++
+		}
+	}
+
+	/* if we have copied something, adjust the copy length */
+	if copy != 0 {
+		output[op-copy-1] = byte(copy - 1)
+	} else {
+		op--
+	}
+
+	return int(op)
 }
 
-// Define fastlz2Compress function
-func fastlz2Compress(input []byte, output []byte) int {
-	ip := 0
-	ipStart := 0
-	ipBound := len(input) - 4
-	ipLimit := len(input) - 12 - 1
-	op := 0
+func fastlz2Compress(input []byte, length int, output []byte) int {
+	var ip uint = 0
+	var ip_bound uint = uint(length - 2)
+	var ip_limit uint = uint(length - 12)
+	var op uint = 0
 
-	var htab [HASH_SIZE]uint32
-	var seq, hash uint32
+	var htab [HASH_SIZE]uint
+	var hslot uint
+	var hval uint
 
-	// Initialize hash table
-	for i := range htab {
-		htab[i] = 0
+	var copy uint
+
+	/* sanity check */
+	if length < 4 {
+		if length != 0 {
+			/* create literal copy only */
+			output[op] = byte(length - 1)
+			op++
+			ip_bound++
+			for ip <= ip_bound {
+				output[op] = input[ip]
+				op++
+				ip++
+			}
+			return length + 1
+		} else {
+			return 0
+		}
 	}
 
-	// Start with literal copy
-	anchor := ip
-	ip += 2
+	/* initializes hash table */
+	// do nothing
 
-	// Main loop
-	for ip < ipLimit {
-		var ref int
-		var distance uint32
-		var cmp uint32
+	/* we start with literal copy */
+	copy = 2
+	output[op] = MAX_COPY - 1
+	op++
+	output[op] = input[ip]
+	op++
+	ip++
+	output[op] = input[ip]
+	op++
+	ip++
 
-		// Find potential match
-		for {
-			if ip+3 >= len(input) {
-				break
-			}
-			seq = flzReadU32(input[ip:]) & 0xffffff
-			hash = uint32(flzHash(seq))
-			ref = ipStart + int(htab[hash])
-			htab[hash] = uint32(ip - ipStart)
-			distance = uint32(ip - ref)
-			cmp = uint32(math.MaxUint32)
-			if distance < MAX_FARDISTANCE {
-				cmp = flzReadU32(input[ref:]) & 0xffffff
-			}
-			if ip >= ipLimit {
-				break
-			}
-			ip++
-			if seq == cmp {
-				break
-			}
+	/* main loop */
+	for ip < ip_limit {
+		var ref uint
+		var distance uint
+
+		/* minimum match length */
+		var len uint = 3
+
+		/* comparison starting-point */
+		anchor := ip
+
+		/* check for a run */
+		if input[ip] == input[ip-1] && (uint(input[ip-1])|uint(input[ip])<<8) == (uint(input[ip+1])|uint(input[ip+2])<<8) {
+			distance = 1
+			ip += 3
+			ref = anchor - 1 + 3
+			goto match
 		}
 
-		if ip >= ipLimit {
-			break
-		}
-		ip--
+		/* find potential match */
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
 
-		// Far match needs at least 5-byte match
+		hslot = hval
+		ref = htab[hval]
+
+		/* calculate distance to the match */
+		distance = anchor - ref
+
+		/* update hash table */
+		htab[hslot] = anchor
+
+		/* is this a match? check the first 3 bytes */
+		if distance == 0 ||
+			(distance >= MAX_FARDISTANCE) ||
+			input[ref] != input[ip] || input[ref+1] != input[ip+1] || input[ref+2] != input[ip+2] {
+			goto literal
+		}
+
+		/* far, needs at least 5-byte match */
 		if distance >= MAX_DISTANCE2 {
 			if input[ref+3] != input[ip+3] || input[ref+4] != input[ip+4] {
+				goto literal
+			}
+			len += 2
+		}
+
+		ref += len
+
+	match:
+
+		/* last matched byte */
+		ip = anchor + len
+
+		/* distance is biased */
+		distance--
+
+		if distance == 0 {
+			/* zero distance means a run */
+			x := input[ip-1]
+			for ip < ip_bound {
+				if input[ref] != x {
+					break
+				} else {
+					ip++
+				}
+				ref++
+			}
+		} else {
+			for {
+				/* safe because the outer check against ip limit */
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
 				ip++
-				continue
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+				if input[ref] != input[ip] {
+					break
+				}
+				ref++
+				ip++
+
+				for ip < ip_bound {
+					if input[ref] != input[ip] {
+						break
+					}
+					ref++
+					ip++
+				}
+				break
+			}
+			ref++
+			ip++
+		}
+		/* if we have copied something, adjust the copy count */
+		if copy != 0 {
+			/* copy is biased, '0' means 1 byte copy */
+			output[op-copy-1] = byte(copy - 1)
+		} else {
+			/* back, to overwrite the copy count */
+			op--
+		}
+		/* reset literal counter */
+		copy = 0
+
+		/* length is biased, '1' means a match of 3 bytes */
+		ip -= 3
+		len = ip - anchor
+
+		/* encode the match */
+		if distance < MAX_DISTANCE2 {
+			if len < 7 {
+				output[op] = byte((len << 5) + (distance >> 8))
+				op++
+				output[op] = byte(distance & 255)
+				op++
+			} else {
+				output[op] = byte((7 << 5) + (distance >> 8))
+				op++
+				for len -= 7; len >= 255; len -= 255 {
+					output[op] = 255
+					op++
+				}
+				output[op] = byte(len)
+				op++
+				output[op] = byte(distance & 255)
+				op++
+			}
+		} else {
+			/* far away, but not yet in the another galaxy... */
+			if len < 7 {
+				distance -= MAX_DISTANCE2
+				output[op] = byte((len << 5) + 31)
+				op++
+				output[op] = 255
+				op++
+				output[op] = byte(distance >> 8)
+				op++
+				output[op] = byte(distance & 255)
+				op++
+			} else {
+				distance -= MAX_DISTANCE2
+				output[op] = (7 << 5) + 31
+				op++
+				for len -= 7; len >= 255; len -= 255 {
+					output[op] = 255
+					op++
+				}
+				output[op] = byte(len)
+				op++
+				output[op] = 255
+				op++
+				output[op] = byte(distance >> 8)
+				op++
+				output[op] = byte(distance & 255)
+				op++
 			}
 		}
 
-		if ip > anchor {
-			output = flzLiterals(uint(ip-anchor), input[anchor:ip], output)
-			op = len(output)
+		/* update the hash at match boundary */
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
+		htab[hval] = ip
+		ip++
+		hval = (uint(input[ip]) | uint(input[ip+1])<<8)
+		hval ^= (uint(input[ip+1]) | uint(input[ip+2])<<8) ^ (hval >> (16 - HASH_LOG))
+		hval &= HASH_MASK
+		htab[hval] = ip
+		ip++
+
+		/* assuming literal copy */
+		output[op] = MAX_COPY - 1
+		op++
+
+		continue
+
+	literal:
+		output[op] = input[anchor]
+		op++
+		anchor++
+		ip = anchor
+		copy++
+		if copy == MAX_COPY {
+			copy = 0
+			output[op] = MAX_COPY - 1
+			op++
 		}
-
-		matchLen := uint32(flzCmp(input[ref+3:], input[ip+3:], input[ipBound:]))
-		output = flz2Match(matchLen, distance, output)
-		op = len(output)
-
-		// Update the hash at match boundary
-		ip += int(matchLen)
-		seq = flzReadU32(input[ip:])
-		hash = uint32(flzHash(seq & 0xffffff))
-		htab[hash] = uint32(ip - ipStart)
-		seq >>= 8
-		hash = uint32(flzHash(seq))
-		htab[hash] = uint32(ip - ipStart + 1)
-
-		anchor = ip
 	}
 
-	copyLen := len(input) - anchor
-	output = flzLiterals(uint(copyLen), input[anchor:], output)
-	op = len(output)
+	/* left-over as literal copy */
+	ip_bound++
+	for ip <= ip_bound {
+		output[op] = input[ip]
+		op++
+		ip++
+		copy++
+		if copy == MAX_COPY {
+			copy = 0
+			output[op] = MAX_COPY - 1
+			op++
+		}
+	}
 
-	// Marker for fastlz2
+	/* if we have copied something, adjust the copy length */
+	if copy != 0 {
+		output[op-copy-1] = byte(copy - 1)
+	} else {
+		op--
+	}
+
+	/* marker for fastlz2 */
 	output[0] |= (1 << 5)
 
-	return op
+	return int(op)
 }
 
 func fastlz1Decompress(input []byte, length int, output []byte, maxout int) int {

@@ -9,7 +9,7 @@ func Compress(input []byte) ([]byte, error) {
 	}
 
 	output := make([]byte, length*2)
-	size := fastlzCompress(input, output)
+	size := fastlzCompress(input, length, output)
 
 	if size == 0 {
 		return nil, errors.New("error compressing data")

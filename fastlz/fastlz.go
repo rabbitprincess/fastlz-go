@@ -23,7 +23,6 @@ func Compress(input []byte) ([]byte, error) {
 
 	result := make([]byte, length*2)
 	size := C.fastlz_compress(unsafe.Pointer(&input[0]), C.int(length), unsafe.Pointer(&result[0]))
-
 	runtime.KeepAlive(input)
 
 	if size == 0 {
